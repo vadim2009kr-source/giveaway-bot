@@ -7,7 +7,7 @@ from html import escape
 from aiogram import Bot
 
 import db
-from utils import is_subscribed, mention
+from utils import is_subscribed_all, mention
 
 # SystemRandom — «честный» генератор случайных чисел, его нельзя предсказать.
 rng = random.SystemRandom()
@@ -20,12 +20,12 @@ async def draw(bot: Bot, giveaway) -> None:
     people = list(await db.participants(gid))
     rng.shuffle(people)
 
-    # Идём по перемешанному списку и берём тех, кто всё ещё подписан на канал.
+    # Идём по перемешанному списку и берём тех, кто всё ещё подписан на все каналы.
     winners = []
     for user_id, name in people:
         if len(winners) >= giveaway["winners_count"]:
             break
-        if await is_subscribed(bot, giveaway["channel_id"], user_id):
+        if await is_subscribed_all(bot, giveaway, user_id):
             winners.append((user_id, name))
         await asyncio.sleep(0.05)  # не спамим Telegram запросами
 

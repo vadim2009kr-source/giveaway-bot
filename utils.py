@@ -1,4 +1,5 @@
 """Общие помощники, которые нужны в разных частях бота."""
+import json
 from datetime import datetime
 from html import escape
 
@@ -26,17 +27,46 @@ async def is_subscribed(bot: Bot, chat_id: int, user_id: int) -> bool:
     return member.status == ChatMemberStatus.RESTRICTED and getattr(member, "is_member", False)
 
 
+def extra_channels(giveaway) -> list[dict]:
+    """Каналы-партнёры розыгрыша: [{"id": ..., "title": ..., "link": ...}]."""
+    return json.loads(giveaway["extra_channels"] or "[]")
+
+
+async def is_subscribed_all(bot: Bot, giveaway, user_id: int) -> bool:
+    """Подписан ли человек на основной канал и на все каналы-партнёры."""
+    channel_ids = [giveaway["channel_id"]] + [c["id"] for c in extra_channels(giveaway)]
+    for chat_id in channel_ids:
+        if not await is_subscribed(bot, chat_id, user_id):
+            return False
+    return True
+
+
+def channel_link(chat) -> str | None:
+    """Ссылка на канал: публичная по @username или пригласительная, если канал закрытый."""
+    if chat.username:
+        return f"https://t.me/{chat.username}"
+    return chat.invite_link
+
+
 def format_time(ts: int) -> str:
     return datetime.fromtimestamp(ts, MSK).strftime("%d.%m.%Y %H:%M") + " (МСК)"
 
 
-def post_text(text: str, winners: int, ends_at: int, bot_username: str, watermark: bool) -> str:
+def post_text(text: str, winners: int, ends_at: int, bot_username: str, watermark: bool,
+              partners: list[dict] | None = None) -> str:
     result = (
         f"{text}\n\n"
         f"🏆 Победителей: <b>{winners}</b>\n"
         f"⏰ Итоги: <b>{format_time(ends_at)}</b>\n"
-        f"Чтобы участвовать, подпишитесь на канал и нажмите кнопку ниже."
     )
+    if partners:
+        result += "\nЧтобы участвовать, подпишитесь на этот канал и на каналы-партнёры:\n"
+        for c in partners:
+            title = escape(c["title"])
+            result += f'• <a href="{escape(c["link"])}">{title}</a>\n' if c.get("link") else f"• {title}\n"
+        result += "и нажмите кнопку ниже."
+    else:
+        result += "Чтобы участвовать, подпишитесь на канал и нажмите кнопку ниже."
     if watermark:
         result += f"\n\n<i>Розыгрыш проводится через @{escape(bot_username)}</i>"
     return result

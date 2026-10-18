@@ -1,4 +1,5 @@
 """Работа с базой данных SQLite (это один файл bot.db рядом с ботом)."""
+import json
 import time
 
 import aiosqlite
@@ -17,6 +18,7 @@ CREATE TABLE IF NOT EXISTS giveaways (
     channel_title TEXT NOT NULL,
     text TEXT NOT NULL,                           -- текст поста (HTML)
     photo_id TEXT,                                -- картинка, если есть
+    extra_channels TEXT NOT NULL DEFAULT '[]',     -- каналы-партнёры (JSON-список)
     winners_count INTEGER NOT NULL,
     ends_at INTEGER NOT NULL,                     -- когда подводить итоги (unix-время)
     message_id INTEGER,                           -- номер поста в канале
@@ -45,6 +47,11 @@ def _connect():
 async def init():
     async with _connect() as db:
         await db.executescript(SCHEMA)
+        # Если база создана старой версией бота, добавляем новую колонку.
+        cur = await db.execute("PRAGMA table_info(giveaways)")
+        columns = [row[1] for row in await cur.fetchall()]
+        if "extra_channels" not in columns:
+            await db.execute("ALTER TABLE giveaways ADD COLUMN extra_channels TEXT NOT NULL DEFAULT '[]'")
         await db.commit()
 
 
@@ -77,12 +84,14 @@ async def add_payment(user_id: int, charge_id: str, amount: int, until: int):
 
 # ---------- Розыгрыши ----------
 
-async def create_giveaway(owner_id, channel_id, channel_title, text, photo_id, winners_count, ends_at) -> int:
+async def create_giveaway(owner_id, channel_id, channel_title, text, photo_id, winners_count, ends_at,
+                          extra_channels: list | None = None) -> int:
     async with _connect() as db:
         cur = await db.execute(
-            "INSERT INTO giveaways (owner_id, channel_id, channel_title, text, photo_id, winners_count, ends_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (owner_id, channel_id, channel_title, text, photo_id, winners_count, ends_at),
+            "INSERT INTO giveaways (owner_id, channel_id, channel_title, text, photo_id, winners_count, ends_at, "
+            "extra_channels) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (owner_id, channel_id, channel_title, text, photo_id, winners_count, ends_at,
+             json.dumps(extra_channels or [], ensure_ascii=False)),
         )
         await db.commit()
         return cur.lastrowid
