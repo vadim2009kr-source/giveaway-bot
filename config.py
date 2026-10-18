@@ -1,0 +1,21 @@
+"""Настройки бота. Всё секретное берётся из файла .env, а не пишется в коде."""
+import os
+from datetime import timedelta, timezone
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+PREMIUM_PRICE_STARS = int(os.getenv("PREMIUM_PRICE_STARS", "150"))
+DB_PATH = os.getenv("DB_PATH", "bot.db")
+
+# Время показываем и принимаем по Москве (UTC+3, переходов на летнее время нет).
+MSK = timezone(timedelta(hours=3))
+
+# 30 дней в секундах: Telegram принимает подписку только на такой срок.
+PREMIUM_PERIOD = 30 * 24 * 60 * 60
+
+# Ограничения бесплатной и платной версии.
+FREE_LIMITS = {"max_active": 1, "max_winners": 3, "watermark": True}
+PREMIUM_LIMITS = {"max_active": 20, "max_winners": 100, "watermark": False}
