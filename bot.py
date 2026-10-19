@@ -28,6 +28,7 @@ async def main():
         BotCommand(command="new", description="Создать розыгрыш"),
         BotCommand(command="my", description="Мои розыгрыши"),
         BotCommand(command="premium", description="Премиум"),
+        BotCommand(command="invite", description="Пригласить админа"),
         BotCommand(command="paysupport", description="Помощь с оплатой"),
     ])
 

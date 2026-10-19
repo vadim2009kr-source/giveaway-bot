@@ -8,7 +8,7 @@ from aiogram import Bot
 
 import db
 from handlers.owner import notify_owner
-from utils import is_subscribed_all, mention
+from utils import is_subscribed_all, limits_for, mention
 
 # SystemRandom — «честный» генератор случайных чисел, его нельзя предсказать.
 rng = random.SystemRandom()
@@ -35,6 +35,9 @@ async def draw(bot: Bot, giveaway) -> None:
         result = f"🎉 <b>Итоги розыгрыша!</b>\n\nУчастников: {len(people)}\nПобедители:\n{lines}\n\nПоздравляем!"
     else:
         result = "😔 Розыгрыш завершён, но подходящих участников не нашлось."
+    if (await limits_for(giveaway["owner_id"]))["watermark"]:
+        me = await bot.me()
+        result += f"\n\n<i>Розыгрыш проведён через @{escape(me.username)}</i>"
 
     try:
         await bot.send_message(giveaway["channel_id"], result, reply_to_message_id=giveaway["message_id"])

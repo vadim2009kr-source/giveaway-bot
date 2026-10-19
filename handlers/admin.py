@@ -5,16 +5,16 @@ from html import escape
 
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatMemberStatus, ChatType
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
                            Message, MessageOriginChannel)
 
 import db
-from config import MSK
+from config import MSK, REFERRAL_BONUS_DAYS
 from draw import draw
-from utils import channel_link, format_time, join_keyboard, limits_for, post_text
+from utils import channel_link, format_time, limits_for, post_keyboard, post_text
 
 router = Router()
 # Этот файл отвечает только на личные сообщения боту.
@@ -29,6 +29,7 @@ HELP = (
     "/new — создать розыгрыш\n"
     "/my — мои активные розыгрыши\n"
     "/premium — премиум без ограничений\n"
+    "/invite — пригласить админа и получить премиум\n"
     "/cancel — отменить создание"
 )
 
@@ -44,9 +45,28 @@ class NewGiveaway(StatesGroup):
 
 @router.message(CommandStart())
 @router.message(Command("help"))
-async def start(message: Message):
-    await db.touch_user(message.from_user.id)
+async def start(message: Message, command: CommandObject):
+    # Ссылка вида t.me/бот?start=ref_123 значит, что человека пригласил пользователь 123.
+    referrer = None
+    if command.args and command.args.startswith("ref_") and command.args[4:].isdigit():
+        referrer = int(command.args[4:])
+    await db.touch_user(message.from_user.id, referrer)
     await message.answer(HELP)
+
+
+@router.message(Command("invite"))
+async def invite(message: Message, bot: Bot):
+    await db.touch_user(message.from_user.id)
+    me = await bot.me()
+    link = f"https://t.me/{me.username}?start=ref_{message.from_user.id}"
+    came, active = await db.referral_stats(message.from_user.id)
+    await message.answer(
+        "🤝 <b>Пригласите админа другого канала</b>\n\n"
+        f"Когда он придёт по вашей ссылке и проведёт первый розыгрыш, вы оба получите "
+        f"{REFERRAL_BONUS_DAYS} дней премиума бесплатно.\n\n"
+        f"Ваша ссылка:\n{link}\n\n"
+        f"Пришло по ссылке: {came}, провели розыгрыш: {active}"
+    )
 
 
 @router.message(Command("cancel"))
@@ -318,11 +338,12 @@ async def publish(call: CallbackQuery, state: FSMContext, bot: Bot):
     )
     me = await bot.me()
     text = post_text(data["text"], data["winners"], data["ends_at"], me.username, limits["watermark"], data["partners"])
+    keyboard = await post_keyboard(bot, gid, call.from_user.id)
     try:
         if data["photo_id"]:
-            post = await bot.send_photo(data["channel_id"], data["photo_id"], caption=text, reply_markup=join_keyboard(gid))
+            post = await bot.send_photo(data["channel_id"], data["photo_id"], caption=text, reply_markup=keyboard)
         else:
-            post = await bot.send_message(data["channel_id"], text, reply_markup=join_keyboard(gid))
+            post = await bot.send_message(data["channel_id"], text, reply_markup=keyboard)
     except Exception as e:
         await db.delete_giveaway(gid)
         await call.message.answer(f"Не получилось опубликовать пост: {e}\nПроверьте мои права в канале.")
@@ -332,3 +353,20 @@ async def publish(call: CallbackQuery, state: FSMContext, bot: Bot):
     await db.set_message_id(gid, post.message_id)
     await call.message.answer(f"Готово! Розыгрыш опубликован, итоги {format_time(data['ends_at'])}.\nСледить за ним: /my")
     await call.answer()
+    await reward_referral(bot, call.from_user.id)
+
+
+async def reward_referral(bot: Bot, user_id: int):
+    """Первый розыгрыш приглашённого админа: дарим премиум ему и тому, кто его пригласил."""
+    referrer = await db.claim_referral(user_id)
+    if not referrer:
+        return
+    await db.grant_premium(user_id, REFERRAL_BONUS_DAYS)
+    await db.grant_premium(referrer, REFERRAL_BONUS_DAYS)
+    await bot.send_message(user_id, f"🎁 Вам подарок за первый розыгрыш: {REFERRAL_BONUS_DAYS} дней премиума!")
+    try:
+        await bot.send_message(
+            referrer, f"🎁 Приглашённый вами админ провёл первый розыгрыш. Вам {REFERRAL_BONUS_DAYS} дней премиума!"
+        )
+    except Exception:
+        pass  # пригласивший мог заблокировать бота, премиум всё равно начислен

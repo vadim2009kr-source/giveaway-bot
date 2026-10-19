@@ -9,7 +9,9 @@ from config import DB_PATH
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
-    premium_until INTEGER NOT NULL DEFAULT 0      -- до какого момента (unix-время) действует премиум
+    premium_until INTEGER NOT NULL DEFAULT 0,     -- до какого момента (unix-время) действует премиум
+    referred_by INTEGER,                          -- кто пригласил по реферальной ссылке
+    ref_rewarded INTEGER NOT NULL DEFAULT 0       -- 1, если бонус за приглашение уже выдан
 );
 CREATE TABLE IF NOT EXISTS giveaways (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,6 +54,11 @@ async def init():
         columns = [row[1] for row in await cur.fetchall()]
         if "extra_channels" not in columns:
             await db.execute("ALTER TABLE giveaways ADD COLUMN extra_channels TEXT NOT NULL DEFAULT '[]'")
+        cur = await db.execute("PRAGMA table_info(users)")
+        columns = [row[1] for row in await cur.fetchall()]
+        if "referred_by" not in columns:
+            await db.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER")
+            await db.execute("ALTER TABLE users ADD COLUMN ref_rewarded INTEGER NOT NULL DEFAULT 0")
         await db.commit()
 
 
@@ -68,11 +75,44 @@ async def is_premium(user_id: int) -> bool:
     return await premium_until(user_id) > time.time()
 
 
-async def touch_user(user_id: int):
-    """Запоминает, что человек пользовался ботом (для статистики)."""
+async def touch_user(user_id: int, referrer: int | None = None):
+    """Запоминает, что человек пользовался ботом (для статистики).
+    referrer — кто пригласил; засчитывается только для совсем нового пользователя."""
     async with _connect() as db:
-        await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+        cur = await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+        if cur.rowcount and referrer and referrer != user_id:
+            await db.execute(
+                "UPDATE users SET referred_by = ? WHERE user_id = ? "
+                "AND EXISTS (SELECT 1 FROM users WHERE user_id = ?)",
+                (referrer, user_id, referrer),
+            )
         await db.commit()
+
+
+async def claim_referral(user_id: int) -> int | None:
+    """Если человека пригласили и бонус ещё не выдан, отмечает его выданным и возвращает ID пригласившего."""
+    async with _connect() as db:
+        cur = await db.execute(
+            "UPDATE users SET ref_rewarded = 1 "
+            "WHERE user_id = ? AND referred_by IS NOT NULL AND ref_rewarded = 0",
+            (user_id,),
+        )
+        await db.commit()
+        if not cur.rowcount:
+            return None
+        cur = await db.execute("SELECT referred_by FROM users WHERE user_id = ?", (user_id,))
+        row = await cur.fetchone()
+    return row[0]
+
+
+async def referral_stats(user_id: int) -> tuple[int, int]:
+    """Сколько человек пришло по ссылке и сколько из них уже провели розыгрыш."""
+    async with _connect() as db:
+        cur = await db.execute(
+            "SELECT COUNT(*), COALESCE(SUM(ref_rewarded), 0) FROM users WHERE referred_by = ?", (user_id,)
+        )
+        row = await cur.fetchone()
+    return row[0], row[1]
 
 
 async def grant_premium(user_id: int, days: int) -> int:

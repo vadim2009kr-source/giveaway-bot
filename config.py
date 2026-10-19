@@ -23,3 +23,7 @@ PREMIUM_PERIOD = 30 * 24 * 60 * 60
 # max_channels — на сколько каналов нужно подписаться (основной + каналы-партнёры).
 FREE_LIMITS = {"max_active": 1, "max_winners": 3, "max_channels": 1, "watermark": True}
 PREMIUM_LIMITS = {"max_active": 20, "max_winners": 100, "max_channels": 10, "watermark": False}
+
+# Реферальная программа: столько дней премиума получают оба, когда приглашённый админ
+# публикует свой первый розыгрыш.
+REFERRAL_BONUS_DAYS = 7
