@@ -6,7 +6,7 @@ from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery
 
 import db
-from utils import is_subscribed_all, join_keyboard
+from utils import is_subscribed_all, limits_for, post_keyboard
 
 router = Router()
 
@@ -29,7 +29,7 @@ async def _refresh_counter(bot: Bot, giveaway_id: int):
             total = await db.count_participants(giveaway_id)
             await bot.edit_message_reply_markup(
                 chat_id=giveaway["channel_id"], message_id=giveaway["message_id"],
-                reply_markup=join_keyboard(giveaway_id, total),
+                reply_markup=await post_keyboard(bot, giveaway_id, giveaway["owner_id"], total),
             )
     except Exception:
         pass  # не страшно, если счётчик не обновился: обновится при следующем участнике
@@ -67,6 +67,9 @@ async def join(call: CallbackQuery, bot: Bot):
     total = await db.count_participants(giveaway["id"])
     if added:
         schedule_counter_update(bot, giveaway["id"])
-        await call.answer(f"✅ Вы участвуете! Всего участников: {total}.\nНе отписывайтесь до итогов.", show_alert=True)
+        text = f"✅ Вы участвуете! Всего участников: {total}.\nНе отписывайтесь до итогов."
+        if (await limits_for(giveaway["owner_id"]))["watermark"]:
+            text += "\n\nХотите такой же розыгрыш в своём канале? Кнопка под постом 👇"
+        await call.answer(text, show_alert=True)
     else:
         await call.answer(f"Вы уже участвуете. Всего участников: {total}.", show_alert=True)

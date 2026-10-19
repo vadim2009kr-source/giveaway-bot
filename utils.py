@@ -72,11 +72,22 @@ def post_text(text: str, winners: int, ends_at: int, bot_username: str, watermar
     return result
 
 
-def join_keyboard(giveaway_id: int, members: int = 0) -> InlineKeyboardMarkup:
+def join_keyboard(giveaway_id: int, members: int = 0, promo_url: str | None = None) -> InlineKeyboardMarkup:
     text = f"🎉 Участвовать ({members})" if members else "🎉 Участвовать"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=text, callback_data=f"join:{giveaway_id}")]
-    ])
+    rows = [[InlineKeyboardButton(text=text, callback_data=f"join:{giveaway_id}")]]
+    if promo_url:
+        # В бесплатной версии под постом есть кнопка, которая ведёт новых админов в бота.
+        rows.append([InlineKeyboardButton(text="🎁 Провести свой розыгрыш", url=promo_url)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def post_keyboard(bot: Bot, giveaway_id: int, owner_id: int, members: int = 0) -> InlineKeyboardMarkup:
+    """Кнопки под постом розыгрыша: с рекламной кнопкой, если у создателя бесплатная версия."""
+    promo_url = None
+    if (await limits_for(owner_id))["watermark"]:
+        me = await bot.me()
+        promo_url = f"https://t.me/{me.username}?start=gw"
+    return join_keyboard(giveaway_id, members, promo_url)
 
 
 def mention(user_id: int, name: str) -> str:
