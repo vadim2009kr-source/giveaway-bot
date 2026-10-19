@@ -1,5 +1,6 @@
 """Платная подписка через Telegram Stars."""
 import time
+from html import escape
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
@@ -8,6 +9,7 @@ from aiogram.types import (InlineKeyboardButton, InlineKeyboardMarkup, LabeledPr
 
 import db
 from config import PREMIUM_PERIOD, PREMIUM_PRICE_STARS
+from handlers.owner import notify_owner
 from utils import format_time
 
 router = Router()
@@ -16,6 +18,7 @@ BENEFITS = (
     "⭐ <b>Премиум</b>\n\n"
     "• до 20 розыгрышей одновременно (вместо 1)\n"
     "• до 100 победителей (вместо 3)\n"
+    "• совместные розыгрыши: подписка ещё на 9 каналов-партнёров\n"
     "• без подписи бота под постом\n\n"
     f"Цена: {PREMIUM_PRICE_STARS} ⭐ в месяц, продлевается автоматически. Отменить можно в любой момент в настройках Telegram."
 )
@@ -23,6 +26,7 @@ BENEFITS = (
 
 @router.message(Command("premium"))
 async def premium(message: Message, bot: Bot):
+    await db.touch_user(message.from_user.id)
     until = await db.premium_until(message.from_user.id)
     if until > time.time():
         await message.answer(f"{BENEFITS}\n\n✅ У вас премиум до {format_time(until)}.")
@@ -47,12 +51,15 @@ async def pre_checkout(query: PreCheckoutQuery):
 
 
 @router.message(F.successful_payment)
-async def paid(message: Message):
+async def paid(message: Message, bot: Bot):
     payment = message.successful_payment
     # При автопродлении Telegram присылает новое сообщение об оплате и новую дату окончания.
     until = payment.subscription_expiration_date or int(time.time()) + PREMIUM_PERIOD
     await db.add_payment(message.from_user.id, payment.telegram_payment_charge_id, payment.total_amount, until)
     await message.answer(f"Спасибо! Премиум активен до {format_time(until)} 🎉")
+    user = message.from_user
+    who = f"@{user.username}" if user.username else user.full_name
+    await notify_owner(bot, f"💰 Оплата {payment.total_amount} ⭐ от {escape(who)} (ID {user.id})")
 
 
 @router.message(Command("paysupport"))

@@ -45,6 +45,7 @@ class NewGiveaway(StatesGroup):
 @router.message(CommandStart())
 @router.message(Command("help"))
 async def start(message: Message):
+    await db.touch_user(message.from_user.id)
     await message.answer(HELP)
 
 
@@ -89,6 +90,7 @@ async def draw_now(call: CallbackQuery, bot: Bot):
 
 @router.message(Command("new"))
 async def new(message: Message, state: FSMContext):
+    await db.touch_user(message.from_user.id)
     limits = await limits_for(message.from_user.id)
     active = await db.active_giveaways(message.from_user.id)
     if len(active) >= limits["max_active"]:

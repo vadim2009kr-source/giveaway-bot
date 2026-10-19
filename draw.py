@@ -7,6 +7,7 @@ from html import escape
 from aiogram import Bot
 
 import db
+from handlers.owner import notify_owner
 from utils import is_subscribed_all, mention
 
 # SystemRandom — «честный» генератор случайных чисел, его нельзя предсказать.
@@ -55,6 +56,7 @@ async def scheduler(bot: Bot) -> None:
         try:
             for giveaway in await db.due_giveaways():
                 await draw(bot, giveaway)
-        except Exception:
+        except Exception as e:
             logging.exception("Ошибка в планировщике")
+            await notify_owner(bot, f"⚠️ Ошибка при подведении итогов: {escape(repr(e)[:3000])}")
         await asyncio.sleep(20)
