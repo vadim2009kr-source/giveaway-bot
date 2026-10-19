@@ -10,7 +10,7 @@ from aiogram.types import BotCommand
 import db
 from config import BOT_TOKEN
 from draw import scheduler
-from handlers import admin, join, premium
+from handlers import admin, join, owner, premium
 
 
 async def main():
@@ -21,7 +21,8 @@ async def main():
     await db.init()
     bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
-    dp.include_routers(premium.router, join.router, admin.router)
+    dp.include_routers(owner.router, premium.router, join.router, admin.router)
+    dp.errors.register(owner.on_error)
 
     await bot.set_my_commands([
         BotCommand(command="new", description="Создать розыгрыш"),
@@ -31,6 +32,7 @@ async def main():
     ])
 
     checker = asyncio.create_task(scheduler(bot))  # фоновая проверка времени итогов
+    backups = asyncio.create_task(owner.backup_loop(bot))  # ежедневная копия базы владельцу
     await dp.start_polling(bot)
 
 

@@ -68,6 +68,54 @@ async def is_premium(user_id: int) -> bool:
     return await premium_until(user_id) > time.time()
 
 
+async def touch_user(user_id: int):
+    """Запоминает, что человек пользовался ботом (для статистики)."""
+    async with _connect() as db:
+        await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+        await db.commit()
+
+
+async def grant_premium(user_id: int, days: int) -> int:
+    """Бесплатно продлевает премиум на days дней. Возвращает новую дату окончания."""
+    now = int(time.time())
+    until = max(await premium_until(user_id), now) + days * 24 * 60 * 60
+    async with _connect() as db:
+        await db.execute(
+            "INSERT INTO users (user_id, premium_until) VALUES (?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET premium_until = excluded.premium_until",
+            (user_id, until),
+        )
+        await db.commit()
+    return until
+
+
+async def stats() -> dict:
+    now = int(time.time())
+    month_ago = now - 30 * 24 * 60 * 60
+    queries = {
+        "users": ("SELECT COUNT(*) FROM users", ()),
+        "premium": ("SELECT COUNT(*) FROM users WHERE premium_until > ?", (now,)),
+        "giveaways": ("SELECT COUNT(*) FROM giveaways WHERE message_id IS NOT NULL", ()),
+        "active": ("SELECT COUNT(*) FROM giveaways WHERE status = 'active' AND message_id IS NOT NULL", ()),
+        "participants": ("SELECT COUNT(*) FROM participants", ()),
+        "payments_month": ("SELECT COUNT(*) FROM payments WHERE paid_at > ?", (month_ago,)),
+        "stars_month": ("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE paid_at > ?", (month_ago,)),
+        "stars_total": ("SELECT COALESCE(SUM(amount), 0) FROM payments", ()),
+    }
+    result = {}
+    async with _connect() as db:
+        for key, (sql, args) in queries.items():
+            cur = await db.execute(sql, args)
+            result[key] = (await cur.fetchone())[0]
+    return result
+
+
+async def backup(path: str):
+    """Безопасно копирует базу в файл path, даже пока бот работает."""
+    async with _connect() as src, aiosqlite.connect(path) as dst:
+        await src.backup(dst)
+
+
 async def add_payment(user_id: int, charge_id: str, amount: int, until: int):
     async with _connect() as db:
         await db.execute(
