@@ -54,6 +54,37 @@ async def cancel(message: Message, state: FSMContext):
     await message.answer("Отменено. Чтобы начать заново, отправьте /new")
 
 
+# ---------- Мои розыгрыши ----------
+# Эти команды стоят выше шагов создания, чтобы работать и посреди создания розыгрыша.
+
+@router.message(Command("my"))
+async def my(message: Message):
+    items = await db.active_giveaways(message.from_user.id)
+    if not items:
+        await message.answer("Активных розыгрышей нет. Создать: /new")
+        return
+    for g in items:
+        button = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🏁 Подвести итоги сейчас", callback_data=f"draw:{g['id']}")
+        ]])
+        await message.answer(
+            f"«{escape(g['channel_title'])}»\nУчастников: {g['members']}\n"
+            f"Победителей: {g['winners_count']}\nИтоги: {format_time(g['ends_at'])}",
+            reply_markup=button,
+        )
+
+
+@router.callback_query(F.data.startswith("draw:"))
+async def draw_now(call: CallbackQuery, bot: Bot):
+    giveaway = await db.get_giveaway(int(call.data.split(":")[1]))
+    if not giveaway or giveaway["owner_id"] != call.from_user.id or giveaway["status"] != "active":
+        await call.answer("Этот розыгрыш уже завершён.", show_alert=True)
+        return
+    await call.message.edit_reply_markup(reply_markup=None)
+    await call.answer("Подвожу итоги…")
+    await draw(bot, giveaway)
+
+
 # ---------- Шаг 1: канал ----------
 
 @router.message(Command("new"))
@@ -299,33 +330,3 @@ async def publish(call: CallbackQuery, state: FSMContext, bot: Bot):
     await db.set_message_id(gid, post.message_id)
     await call.message.answer(f"Готово! Розыгрыш опубликован, итоги {format_time(data['ends_at'])}.\nСледить за ним: /my")
     await call.answer()
-
-
-# ---------- Мои розыгрыши ----------
-
-@router.message(Command("my"))
-async def my(message: Message):
-    items = await db.active_giveaways(message.from_user.id)
-    if not items:
-        await message.answer("Активных розыгрышей нет. Создать: /new")
-        return
-    for g in items:
-        button = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="🏁 Подвести итоги сейчас", callback_data=f"draw:{g['id']}")
-        ]])
-        await message.answer(
-            f"«{escape(g['channel_title'])}»\nУчастников: {g['members']}\n"
-            f"Победителей: {g['winners_count']}\nИтоги: {format_time(g['ends_at'])}",
-            reply_markup=button,
-        )
-
-
-@router.callback_query(F.data.startswith("draw:"))
-async def draw_now(call: CallbackQuery, bot: Bot):
-    giveaway = await db.get_giveaway(int(call.data.split(":")[1]))
-    if not giveaway or giveaway["owner_id"] != call.from_user.id or giveaway["status"] != "active":
-        await call.answer("Этот розыгрыш уже завершён.", show_alert=True)
-        return
-    await call.message.edit_reply_markup(reply_markup=None)
-    await call.answer("Подвожу итоги…")
-    await draw(bot, giveaway)
