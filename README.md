@@ -7,12 +7,13 @@
 
 ## Как запустить на своём компьютере
 
-1. **Установите Python 3.11 или новее** с [python.org](https://www.python.org/downloads/). На Windows при установке поставьте галочку «Add Python to PATH».
+1. **Установите Python 3.12** ([прямая ссылка для Windows](https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe)). При установке поставьте галочку «Add Python to PATH». На Python 3.14 под Windows библиотека pydantic может не запуститься (ошибка `DLL load failed while importing _pydantic_core`), поэтому лучше 3.12.
 2. **Создайте бота.** В Telegram откройте @BotFather, отправьте `/newbot`, придумайте имя и username (должен заканчиваться на `bot`). BotFather пришлёт токен вида `123456789:AA...`. Это пароль бота, никому его не показывайте.
 3. **Скачайте эту папку** и откройте в ней терминал (на Windows: в адресной строке папки напишите `cmd` и нажмите Enter).
 4. **Установите библиотеки:**
    ```
-   python -m venv venv
+   py -3.12 -m venv venv        (на Windows)
+   python3.12 -m venv venv      (на Mac/Linux)
    venv\Scripts\activate        (на Windows)
    source venv/bin/activate     (на Mac/Linux)
    pip install -r requirements.txt

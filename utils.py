@@ -72,9 +72,10 @@ def post_text(text: str, winners: int, ends_at: int, bot_username: str, watermar
     return result
 
 
-def join_keyboard(giveaway_id: int) -> InlineKeyboardMarkup:
+def join_keyboard(giveaway_id: int, members: int = 0) -> InlineKeyboardMarkup:
+    text = f"🎉 Участвовать ({members})" if members else "🎉 Участвовать"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎉 Участвовать", callback_data=f"join:{giveaway_id}")]
+        [InlineKeyboardButton(text=text, callback_data=f"join:{giveaway_id}")]
     ])
 
 
