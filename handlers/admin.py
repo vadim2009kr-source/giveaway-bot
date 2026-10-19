@@ -14,7 +14,7 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMa
 import db
 from config import MSK
 from draw import draw
-from utils import format_time, join_keyboard, limits_for, post_text
+from utils import channel_link, format_time, join_keyboard, limits_for, post_text
 
 router = Router()
 # Этот файл отвечает только на личные сообщения боту.
@@ -35,6 +35,7 @@ HELP = (
 
 class NewGiveaway(StatesGroup):
     channel = State()
+    partners = State()
     text = State()
     winners = State()
     ends_at = State()
@@ -73,26 +74,36 @@ async def new(message: Message, state: FSMContext):
     )
 
 
-@router.message(NewGiveaway.channel)
-async def got_channel(message: Message, state: FSMContext, bot: Bot):
+async def resolve_channel(message: Message, bot: Bot):
+    """Находит канал по пересланному посту или @username. Возвращает канал или None (и объясняет, что не так)."""
     if isinstance(message.forward_origin, MessageOriginChannel):
         chat_ref = message.forward_origin.chat.id
     elif message.text and message.text.strip().startswith("@"):
         chat_ref = message.text.strip()
     else:
         await message.answer("Перешлите пост из канала или пришлите @username канала.")
-        return
-
+        return None
     try:
         chat = await bot.get_chat(chat_ref)
+    except Exception:
+        await message.answer("Не могу найти этот канал. Проверьте, что я добавлен туда администратором.")
+        return None
+    if chat.type != ChatType.CHANNEL:
+        await message.answer("Это не канал. Пока я работаю только с каналами.")
+        return None
+    return chat
+
+
+@router.message(NewGiveaway.channel)
+async def got_channel(message: Message, state: FSMContext, bot: Bot):
+    chat = await resolve_channel(message, bot)
+    if not chat:
+        return
+    try:
         me = await bot.get_chat_member(chat.id, bot.id)
         user = await bot.get_chat_member(chat.id, message.from_user.id)
     except Exception:
-        await message.answer("Не могу найти этот канал. Проверьте, что я добавлен туда администратором.")
-        return
-
-    if chat.type != ChatType.CHANNEL:
-        await message.answer("Это не канал. Пока я работаю только с каналами.")
+        await message.answer("Не могу проверить права в этом канале. Проверьте, что я добавлен туда администратором.")
         return
     if me.status != ChatMemberStatus.ADMINISTRATOR or not getattr(me, "can_post_messages", False):
         await message.answer("Сделайте меня администратором канала с правом публиковать сообщения и пришлите канал ещё раз.")
@@ -101,9 +112,77 @@ async def got_channel(message: Message, state: FSMContext, bot: Bot):
         await message.answer("Создавать розыгрыши могут только администраторы этого канала.")
         return
 
-    await state.update_data(channel_id=chat.id, channel_title=chat.title)
+    await state.update_data(channel_id=chat.id, channel_title=chat.title, partners=[])
+    limits = await limits_for(message.from_user.id)
+    if limits["max_channels"] > 1:
+        await state.set_state(NewGiveaway.partners)
+        await message.answer(
+            f"Канал «{escape(chat.title)}» подходит ✅\n\n"
+            "Это совместный розыгрыш? Перешлите пост из канала-партнёра или пришлите его @username — "
+            f"участникам нужно будет подписаться и на него (до {limits['max_channels'] - 1} партнёров).\n"
+            "Меня нужно добавить администратором и в каналы-партнёры.",
+            reply_markup=partners_done_keyboard(),
+        )
+    else:
+        await state.set_state(NewGiveaway.text)
+        await message.answer(
+            f"Канал «{escape(chat.title)}» подходит ✅\n"
+            "<i>Совместные розыгрыши с каналами-партнёрами доступны в /premium.</i>\n\n"
+            "Теперь пришлите текст розыгрыша (можно с одной картинкой)."
+        )
+
+
+# ---------- Шаг 1.5: каналы-партнёры (только премиум) ----------
+
+def partners_done_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Готово, дальше ➡️", callback_data="partners_done")
+    ]])
+
+
+@router.message(NewGiveaway.partners)
+async def got_partner(message: Message, state: FSMContext, bot: Bot):
+    chat = await resolve_channel(message, bot)
+    if not chat:
+        return
+    data = await state.get_data()
+    partners = data["partners"]
+    if chat.id == data["channel_id"] or any(c["id"] == chat.id for c in partners):
+        await message.answer("Этот канал уже в списке.", reply_markup=partners_done_keyboard())
+        return
+    try:
+        me = await bot.get_chat_member(chat.id, bot.id)
+    except Exception:
+        me = None
+    # Без прав администратора Telegram не даст боту проверить подписку.
+    if not me or me.status != ChatMemberStatus.ADMINISTRATOR:
+        await message.answer(
+            f"Я не администратор в «{escape(chat.title)}», поэтому не смогу проверить подписку. "
+            "Попросите админа партнёра добавить меня и пришлите канал ещё раз.",
+            reply_markup=partners_done_keyboard(),
+        )
+        return
+
+    limits = await limits_for(message.from_user.id)
+    partners.append({"id": chat.id, "title": chat.title, "link": channel_link(chat)})
+    await state.update_data(partners=partners)
+    if len(partners) + 1 >= limits["max_channels"]:
+        await state.set_state(NewGiveaway.text)
+        await message.answer(f"Добавил «{escape(chat.title)}». Это максимум каналов.\n\nТеперь пришлите текст розыгрыша.")
+        return
+    await message.answer(
+        f"Добавил «{escape(chat.title)}» ✅ Каналов-партнёров: {len(partners)}.\n"
+        "Пришлите следующий или нажмите «Готово».",
+        reply_markup=partners_done_keyboard(),
+    )
+
+
+@router.callback_query(NewGiveaway.partners, F.data == "partners_done")
+async def partners_done(call: CallbackQuery, state: FSMContext):
     await state.set_state(NewGiveaway.text)
-    await message.answer(f"Канал «{escape(chat.title)}» подходит ✅\n\nТеперь пришлите текст розыгрыша (можно с одной картинкой).")
+    await call.message.edit_reply_markup(reply_markup=None)
+    await call.message.answer("Теперь пришлите текст розыгрыша (можно с одной картинкой).")
+    await call.answer()
 
 
 # ---------- Шаг 2: текст ----------
@@ -171,7 +250,7 @@ async def got_end(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     limits = await limits_for(message.from_user.id)
     me = await bot.me()
-    preview = post_text(data["text"], data["winners"], ends_at, me.username, limits["watermark"])
+    preview = post_text(data["text"], data["winners"], ends_at, me.username, limits["watermark"], data["partners"])
     buttons = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Опубликовать", callback_data="publish"),
         InlineKeyboardButton(text="❌ Отмена", callback_data="cancel"),
@@ -202,10 +281,10 @@ async def publish(call: CallbackQuery, state: FSMContext, bot: Bot):
     limits = await limits_for(call.from_user.id)
     gid = await db.create_giveaway(
         call.from_user.id, data["channel_id"], data["channel_title"],
-        data["text"], data["photo_id"], data["winners"], data["ends_at"],
+        data["text"], data["photo_id"], data["winners"], data["ends_at"], data["partners"],
     )
     me = await bot.me()
-    text = post_text(data["text"], data["winners"], data["ends_at"], me.username, limits["watermark"])
+    text = post_text(data["text"], data["winners"], data["ends_at"], me.username, limits["watermark"], data["partners"])
     try:
         if data["photo_id"]:
             post = await bot.send_photo(data["channel_id"], data["photo_id"], caption=text, reply_markup=join_keyboard(gid))
